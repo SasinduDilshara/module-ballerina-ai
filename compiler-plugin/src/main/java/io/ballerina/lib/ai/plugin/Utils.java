@@ -16,7 +16,7 @@
  * under the License.
  */
 
-package io.ballerina.stdlib.ai.plugin;
+package io.ballerina.lib.ai.plugin;
 
 import io.ballerina.compiler.api.symbols.AnnotationSymbol;
 import io.ballerina.compiler.api.symbols.Documentable;

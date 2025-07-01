@@ -16,7 +16,7 @@
  * under the License.
  */
 
-package io.ballerina.stdlib.ai.plugin;
+package io.ballerina.lib.ai.plugin;
 
 import io.ballerina.compiler.syntax.tree.SyntaxKind;
 import io.ballerina.projects.DocumentId;
@@ -44,6 +44,8 @@ public class AiCodeModifier extends CodeModifier {
                 SyntaxKind.MODULE_VAR_DECL);
         codeModifierContext.addSyntaxNodeAnalysisTask(new InitFunctionAnalysisTask(modulesWithPredefinedInitMethods),
                 SyntaxKind.FUNCTION_DEFINITION);
+        codeModifierContext.addSyntaxNodeAnalysisTask(new GenerateFunctionAnalysisTask(),
+                SyntaxKind.METHOD_CALL);
         codeModifierContext.addSourceModifierTask(new AiSourceModifier(modifierContextMap,
                 modulesWithPredefinedInitMethods));
     }

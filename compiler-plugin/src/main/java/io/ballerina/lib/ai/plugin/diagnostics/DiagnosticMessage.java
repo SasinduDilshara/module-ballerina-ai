@@ -16,7 +16,7 @@
  * under the License.
  */
 
-package io.ballerina.stdlib.ai.plugin.diagnostics;
+package io.ballerina.lib.ai.plugin.diagnostics;
 
 /**
  * Compilation error messages used in Ballerina AI package compiler plugin.
