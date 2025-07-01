@@ -23,6 +23,7 @@ import io.ballerina.compiler.syntax.tree.MethodCallExpressionNode;
 import io.ballerina.compiler.syntax.tree.ModulePartNode;
 import io.ballerina.compiler.syntax.tree.NameReferenceNode;
 import io.ballerina.compiler.syntax.tree.NodeVisitor;
+import io.ballerina.compiler.syntax.tree.SimpleNameReferenceNode;
 import io.ballerina.compiler.syntax.tree.SyntaxTree;
 import io.ballerina.projects.Document;
 import io.ballerina.projects.DocumentId;
@@ -51,7 +52,7 @@ class GenerateFunctionAnalysisTask implements ModifierTask<SourceModifierContext
                 SyntaxTree syntaxTree = document.syntaxTree();
                 ModulePartNode rootNode = syntaxTree.rootNode();
                 SemanticModel semanticModel = modifierContext.compilation().getSemanticModel(module.moduleId());
-                new MethodCallValidator(semanticModel).validateMethodCall(rootNode);
+                new MethodCallValidator(semanticModel, document).validateMethodCall(rootNode);
             }
         }
     }
@@ -59,9 +60,11 @@ class GenerateFunctionAnalysisTask implements ModifierTask<SourceModifierContext
     private static class MethodCallValidator extends NodeVisitor {
         private static final String GENERATE_METHOD_NAME = "generate";
         private final SemanticModel semanticModel;
+        private final Document document;
 
-        public MethodCallValidator(SemanticModel semanticModel) {
+        public MethodCallValidator(SemanticModel semanticModel, Document document) {
             this.semanticModel = semanticModel;
+            this.document = document;
         }
 
         public void validateMethodCall(ModulePartNode memberNode) {
@@ -69,13 +72,18 @@ class GenerateFunctionAnalysisTask implements ModifierTask<SourceModifierContext
         }
 
         public void visit(MethodCallExpressionNode methodCallNode) {
-            NameReferenceNode methodName = methodCallNode.methodName();
-            if (!methodName.toSourceCode().equals(GENERATE_METHOD_NAME)) {
+            NameReferenceNode methodReferenceNode = methodCallNode.methodName();
+            if (!(methodReferenceNode instanceof SimpleNameReferenceNode methodName)) {
                 return;
             }
 
-            semanticModel.symbol(methodCallNode.expression()).ifPresent(symbol -> {
+            if (!methodName.name().text().equals(GENERATE_METHOD_NAME)) {
+                return;
+            }
 
+            semanticModel.symbol(methodCallNode.expression()).ifPresent(
+                symbol -> {
+                    semanticModel.visibleSymbols(document, methodCallNode.lineRange().startLine());
             });
         }
     }
