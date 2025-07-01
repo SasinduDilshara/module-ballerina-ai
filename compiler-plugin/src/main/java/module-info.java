@@ -16,7 +16,7 @@
  * under the License.
  */
 
-module io.ballerina.stdlib.ai.plugin {
+module io.ballerina.lib.ai.plugin {
     requires io.ballerina.lang;
     requires io.ballerina.parser;
     requires io.ballerina.tools.api;
