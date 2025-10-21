@@ -19,6 +19,7 @@ graalvmCompatible = true
 [[platform.java21.dependency]]
 groupId = "io.ballerina.stdlib"
 artifactId = "ai-native"
+<<<<<<< HEAD
 version = "1.8.0"
 path = "../native/build/libs/ai-native-1.8.0.jar"
 
@@ -27,6 +28,12 @@ groupId = "io.ballerina.stdlib"
 artifactId = "ai-native"
 version = "1.8.0"
 path = "../native/build/libs/ai-native-1.8.0-tests.jar"
+=======
+version = "1.6.0"
+path = "../native/build/libs/ai-native-1.6.0-SNAPSHOT.jar"
+version = "1.6.0"
+path = "../native/build/libs/ai-native-1.6.0-SNAPSHOT-tests.jar"
+>>>>>>> 9034cec ([Automated] Update the native jar versions)
 testOnly = true
 
 [[platform.java21.dependency]]
