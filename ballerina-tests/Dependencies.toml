@@ -10,7 +10,15 @@ distribution-version = "2201.12.0"
 [[package]]
 org = "ballerina"
 name = "ai"
+<<<<<<< HEAD
 version = "1.8.0"
+=======
+<<<<<<< HEAD
+version = "1.6.0"
+=======
+version = "1.5.5"
+>>>>>>> 282ee39 ([Automated] Update the native jar versions)
+>>>>>>> ca9566f ([Automated] Update the native jar versions)
 dependencies = [
 	{org = "ballerina", name = "constraint"},
 	{org = "ballerina", name = "data.jsondata"},
@@ -41,7 +49,15 @@ modules = [
 [[package]]
 org = "ballerina"
 name = "ai_tests"
+<<<<<<< HEAD
 version = "1.8.0"
+=======
+<<<<<<< HEAD
+version = "1.6.0"
+=======
+version = "1.5.5"
+>>>>>>> 282ee39 ([Automated] Update the native jar versions)
+>>>>>>> ca9566f ([Automated] Update the native jar versions)
 dependencies = [
 	{org = "ballerina", name = "ai"},
 	{org = "ballerina", name = "data.jsondata"},
