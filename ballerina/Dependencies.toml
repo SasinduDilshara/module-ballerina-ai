@@ -164,7 +164,7 @@ modules = [
 [[package]]
 org = "ballerina"
 name = "io"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
 	{org = "ballerina", name = "jballerina.java"},
 	{org = "ballerina", name = "lang.value"}
@@ -353,7 +353,11 @@ dependencies = [
 [[package]]
 org = "ballerina"
 name = "observe"
+<<<<<<< HEAD
 version = "1.6.0"
+=======
+version = "1.5.1"
+>>>>>>> 1d8afa5 ([Automated] Update the native jar versions)
 dependencies = [
 	{org = "ballerina", name = "jballerina.java"}
 ]
