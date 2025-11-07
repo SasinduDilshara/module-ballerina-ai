@@ -10,7 +10,11 @@ distribution-version = "2201.12.0"
 [[package]]
 org = "ballerina"
 name = "ai"
+<<<<<<< HEAD
 version = "1.8.0"
+=======
+version = "1.6.5"
+>>>>>>> 92270a7 ([Automated] Update the native jar versions)
 dependencies = [
 	{org = "ballerina", name = "constraint"},
 	{org = "ballerina", name = "data.jsondata"},
