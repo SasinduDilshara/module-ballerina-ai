@@ -35,4 +35,11 @@
             <Bug code="SF"/>
         </Or>
     </Match>
+    <Match>
+        <Class name="io.ballerina.stdlib.ai.PdfChunker$PdfChunkStrategy"/>
+        <Or>
+            <Bug pattern="SF_SWITCH_FALLTHROUGH"/>
+            <Bug code="SF"/>
+        </Or>
+    </Match>
 </FindBugsFilter>

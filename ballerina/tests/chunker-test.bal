@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ballerina/io;
 import ballerina/test;
 
 @test:Config {}
@@ -1580,6 +1581,466 @@ function testHtmlChunkerHeaderMetadataExtraction() returns error? {
                 test:assertFail("Second H2 chunk should have metadata");
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SemanticChunker tests
+// ---------------------------------------------------------------------------
+
+// Returns a fixed unit vector based on a single-letter "category" marker that
+// appears at the start of each test sentence (e.g. "[A] ...", "[B] ...").
+// Same-category sentences therefore embed to the same vector (distance 0);
+// different-category sentences embed to orthogonal vectors (distance 1).
+isolated client class CategoryEmbeddingProvider {
+    *EmbeddingProvider;
+
+    isolated remote function embed(Chunk chunk) returns Embedding|Error {
+        if chunk !is TextChunk|TextDocument {
+            return error Error("Unsupported chunk type");
+        }
+        return categoryVector(chunk.content);
+    }
+
+    isolated remote function batchEmbed(Chunk[] chunks) returns Embedding[]|Error {
+        Embedding[] embeddings = [];
+        foreach Chunk chunk in chunks {
+            Embedding emb = check self->embed(chunk);
+            embeddings.push(emb);
+        }
+        return embeddings;
+    }
+}
+
+isolated function categoryVector(string text) returns Vector {
+    // Identify the first category marker [X] in the window.
+    int? markerStart = text.indexOf("[");
+    if markerStart is int && markerStart + 2 < text.length() {
+        string marker = text.substring(markerStart + 1, markerStart + 2);
+        match marker {
+            "A" => {
+                return [1.0, 0.0, 0.0, 0.0];
+            }
+            "B" => {
+                return [0.0, 1.0, 0.0, 0.0];
+            }
+            "C" => {
+                return [0.0, 0.0, 1.0, 0.0];
+            }
+            "D" => {
+                return [0.0, 0.0, 0.0, 1.0];
+            }
+        }
+    }
+    return [0.5, 0.5, 0.5, 0.5];
+}
+
+isolated client class FailingEmbeddingProvider {
+    *EmbeddingProvider;
+
+    isolated remote function embed(Chunk chunk) returns Embedding|Error {
+        return error Error("synthetic embedding failure");
+    }
+
+    isolated remote function batchEmbed(Chunk[] chunks) returns Embedding[]|Error {
+        return error Error("synthetic embedding failure");
+    }
+}
+
+@test:Config {}
+function testSemanticChunkerBasicSplit() returns error? {
+    string content = "[A] alpha one. [A] alpha two. [A] alpha three. "
+            + "[B] beta one. [B] beta two. [B] beta three.";
+    TextDocument doc = {content};
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker chunker = check new (provider, bufferSize = 0);
+
+    Chunk[] chunks = check chunker.chunk(doc);
+    test:assertEquals(chunks.length(), 2, msg = "Expected one chunk per category");
+
+    anydata first = chunks[0].content;
+    anydata second = chunks[1].content;
+    test:assertTrue(first is string && (<string>first).includes("[A]"),
+            msg = "First chunk should contain category A content");
+    test:assertTrue(second is string && (<string>second).includes("[B]"),
+            msg = "Second chunk should contain category B content");
+    test:assertFalse(first is string && (<string>first).includes("[B]"),
+            msg = "First chunk should not contain category B content");
+}
+
+@test:Config {}
+function testSemanticChunkerAllThresholdTypes() returns error? {
+    string content = "[A] alpha one. [A] alpha two. [A] alpha three. "
+            + "[B] beta one. [B] beta two. [B] beta three.";
+    TextDocument doc = {content};
+    CategoryEmbeddingProvider provider = new;
+
+    // For each strategy, pick a non-default amount that the synthetic
+    // single-outlier distance distribution (mean ~ 0.2, stddev ~ 0.4) clears.
+    record {|BreakpointThresholdType strategy; float amount;|}[] cases = [
+        {strategy: PERCENTILE, amount: 95.0},
+        {strategy: STANDARD_DEVIATION, amount: 1.0},
+        {strategy: INTERQUARTILE, amount: 0.5},
+        {strategy: GRADIENT, amount: 95.0}
+    ];
+    foreach var c in cases {
+        SemanticChunker chunker = check new (provider, bufferSize = 0,
+                breakpointThresholdType = c.strategy, breakpointThresholdAmount = c.amount);
+        Chunk[] chunks = check chunker.chunk(doc);
+        test:assertTrue(chunks.length() >= 2,
+                msg = string `Strategy ${c.strategy} (amount=${c.amount}) should produce at least 2 chunks`);
+    }
+}
+
+@test:Config {}
+function testSemanticChunkerSingleSentence() returns error? {
+    TextDocument doc = {content: "[A] just one sentence."};
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker chunker = check new (provider);
+
+    Chunk[] chunks = check chunker.chunk(doc);
+    test:assertEquals(chunks.length(), 1);
+    anydata content = chunks[0].content;
+    test:assertTrue(content is string && (<string>content).includes("just one sentence"));
+}
+
+@test:Config {}
+function testSemanticChunkerEmptyDocument() returns error? {
+    TextDocument doc = {content: "   \n\t   "};
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker chunker = check new (provider);
+
+    Chunk[] chunks = check chunker.chunk(doc);
+    test:assertEquals(chunks.length(), 0);
+}
+
+@test:Config {}
+function testSemanticChunkerUnsupportedDocument() returns error? {
+    Document doc = {content: "irrelevant", 'type: "unknown"};
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker chunker = check new (provider);
+
+    Chunk[]|Error result = chunker.chunk(doc);
+    if result is Error {
+        test:assertEquals(result.message(), "Only text documents are supported for chunking");
+    } else {
+        test:assertFail("Expected an Error for unsupported document type");
+    }
+}
+
+@test:Config {}
+function testSemanticChunkerInvalidBufferSize() returns error? {
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker|Error chunker = new (provider, bufferSize = -1);
+    if chunker is Error {
+        test:assertEquals(chunker.message(), "bufferSize must be non-negative");
+    } else {
+        test:assertFail("Expected init to fail for negative bufferSize");
+    }
+}
+
+@test:Config {}
+function testSemanticChunkerInvalidThresholdAmount() returns error? {
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker|Error chunker = new (provider,
+            breakpointThresholdType = PERCENTILE, breakpointThresholdAmount = 150.0);
+    if chunker is Error {
+        test:assertTrue(chunker.message().includes("PERCENTILE"));
+    } else {
+        test:assertFail("Expected init to fail for out-of-range percentile threshold");
+    }
+
+    SemanticChunker|Error chunker2 = new (provider,
+            breakpointThresholdType = STANDARD_DEVIATION, breakpointThresholdAmount = 0.0);
+    if chunker2 is Error {
+        test:assertTrue(chunker2.message().includes("STANDARD_DEVIATION"));
+    } else {
+        test:assertFail("Expected init to fail for non-positive std-dev threshold");
+    }
+}
+
+@test:Config {}
+function testSemanticChunkerMaxChunkSizeSafetyNet() returns error? {
+    string content = "[A] one. [A] two. [A] three. [A] four. "
+            + "[B] five. [B] six. [B] seven. [B] eight.";
+    TextDocument doc = {content};
+    CategoryEmbeddingProvider provider = new;
+    // Force long semantic chunks to be split further.
+    SemanticChunker chunker = check new (provider, bufferSize = 0, maxChunkSize = 20);
+
+    Chunk[] chunks = check chunker.chunk(doc);
+    foreach Chunk chunk in chunks {
+        anydata c = chunk.content;
+        test:assertTrue(c is string && (<string>c).length() <= 20,
+                msg = "Each chunk must respect maxChunkSize after safety-net split");
+    }
+}
+
+@test:Config {}
+function testSemanticChunkerMetadataPropagation() returns error? {
+    string content = "[A] alpha one. [A] alpha two. [B] beta one. [B] beta two.";
+    TextDocument doc = {
+        content,
+        metadata: {fileName: "example.txt", mimeType: "text/plain"}
+    };
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker chunker = check new (provider, bufferSize = 0);
+
+    Chunk[] chunks = check chunker.chunk(doc);
+    test:assertTrue(chunks.length() >= 1);
+    foreach int i in 0 ..< chunks.length() {
+        Metadata? metadata = chunks[i].metadata;
+        test:assertTrue(metadata is Metadata, msg = "Chunk must carry metadata");
+        Metadata m = <Metadata>metadata;
+        test:assertEquals(m.fileName, "example.txt");
+        test:assertEquals(m.mimeType, "text/plain");
+        test:assertEquals(m.index, i);
+    }
+}
+
+@test:Config {}
+function testChunkDocumentSemanticallyFreeFunctionParity() returns error? {
+    string content = "[A] alpha one. [A] alpha two. [B] beta one. [B] beta two.";
+    TextDocument doc = {content};
+    CategoryEmbeddingProvider provider = new;
+
+    Chunk[] viaFunction = check chunkDocumentSemantically(doc, provider, bufferSize = 0);
+    SemanticChunker chunker = check new (provider, bufferSize = 0);
+    Chunk[] viaClass = check chunker.chunk(doc);
+
+    test:assertEquals(viaFunction.length(), viaClass.length());
+    foreach int i in 0 ..< viaFunction.length() {
+        test:assertEquals(viaFunction[i].content, viaClass[i].content);
+    }
+}
+
+@test:Config {}
+function testSemanticChunkerEmbeddingError() returns error? {
+    TextDocument doc = {content: "[A] one. [B] two."};
+    FailingEmbeddingProvider provider = new;
+    SemanticChunker chunker = check new (provider);
+
+    Chunk[]|Error result = chunker.chunk(doc);
+    test:assertTrue(result is Error, msg = "Embedding failures should surface as Error");
+}
+
+@test:Config {}
+function testSemanticChunkerWithBufferSize() returns error? {
+    // bufferSize > 0 smooths the signal: the windows around the transition
+    // sentence include neighbors from both categories. We just assert that
+    // chunking still succeeds and produces at least one chunk.
+    string content = "[A] alpha one. [A] alpha two. [A] alpha three. "
+            + "[B] beta one. [B] beta two. [B] beta three.";
+    TextDocument doc = {content};
+    CategoryEmbeddingProvider provider = new;
+    SemanticChunker chunker = check new (provider, bufferSize = 1);
+
+    Chunk[] chunks = check chunker.chunk(doc);
+    test:assertTrue(chunks.length() >= 1);
+}
+
+@test:Config {}
+function testSemanticChunkerWithStringInput() returns error? {
+    CategoryEmbeddingProvider provider = new;
+    Chunk[] chunks = check chunkDocumentSemantically(
+            "[A] one. [A] two. [B] three. [B] four.", provider, bufferSize = 0);
+    test:assertEquals(chunks.length(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// PdfChunker tests
+// ---------------------------------------------------------------------------
+
+isolated function readTestPdfBytes() returns byte[]|error {
+    return io:fileReadBytes("tests/resources/data-loader/TestDoc.pdf");
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerWithBinaryDocument() returns error? {
+    byte[] pdfBytes = check readTestPdfBytes();
+    BinaryDocument doc = {
+        content: pdfBytes,
+        metadata: {mimeType: "application/pdf", fileName: "TestDoc.pdf"}
+    };
+    PdfChunker chunker = new (4000);
+    Chunk[] chunks = check chunker.chunk(doc);
+
+    test:assertTrue(chunks.length() > 0, msg = "PDF should yield at least one chunk");
+    foreach Chunk chunk in chunks {
+        anydata content = chunk.content;
+        test:assertTrue(content is string, msg = "Chunk content should be a string");
+        test:assertTrue((<string>content).length() > 0, msg = "Chunk content should be non-empty");
+    }
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerEmitsPageMetadata() returns error? {
+    byte[] pdfBytes = check readTestPdfBytes();
+    BinaryDocument doc = {
+        content: pdfBytes,
+        metadata: {mimeType: "application/pdf", fileName: "TestDoc.pdf"}
+    };
+    PdfChunker chunker = new (4000, 40, PDF_PAGE);
+    Chunk[] chunks = check chunker.chunk(doc);
+
+    test:assertTrue(chunks.length() >= 1);
+    boolean sawPageOne = false;
+    boolean sawPageTwo = false;
+    foreach Chunk chunk in chunks {
+        Metadata? metadata = chunk.metadata;
+        test:assertTrue(metadata is Metadata, msg = "Every chunk should have metadata");
+        Metadata m = <Metadata>metadata;
+        test:assertEquals(m.totalPages, 2, msg = "totalPages should equal 2 for TestDoc.pdf");
+        int? page = m.pageNumber;
+        test:assertTrue(page is int, msg = "pageNumber should be set");
+        if page == 1 {
+            sawPageOne = true;
+        } else if page == 2 {
+            sawPageTwo = true;
+        }
+    }
+    test:assertTrue(sawPageOne, msg = "Expected at least one chunk for page 1");
+    test:assertTrue(sawPageTwo, msg = "Expected at least one chunk for page 2");
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerLargePageRecursivelySplit() returns error? {
+    byte[] pdfBytes = check readTestPdfBytes();
+    BinaryDocument doc = {
+        content: pdfBytes,
+        metadata: {mimeType: "application/pdf", fileName: "TestDoc.pdf"}
+    };
+    // Small chunk size forces per-page recursive fallback.
+    PdfChunker chunker = new (80, 0, PDF_PAGE);
+    Chunk[] chunks = check chunker.chunk(doc);
+
+    test:assertTrue(chunks.length() > 2,
+            msg = "Small maxChunkSize should produce more than two chunks");
+    boolean foundLinkedChunk = false;
+    foreach Chunk chunk in chunks {
+        anydata content = chunk.content;
+        test:assertTrue(content is string && (<string>content).length() <= 80,
+                msg = "Each chunk must respect maxChunkSize");
+        Metadata? metadata = chunk.metadata;
+        if metadata is Metadata {
+            if metadata.prev is int {
+                foundLinkedChunk = true;
+            }
+        }
+    }
+    test:assertTrue(foundLinkedChunk,
+            msg = "Recursively split pages should produce chunks linked via prev metadata");
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerParagraphStrategy() returns error? {
+    byte[] pdfBytes = check readTestPdfBytes();
+    BinaryDocument doc = {
+        content: pdfBytes,
+        metadata: {mimeType: "application/pdf", fileName: "TestDoc.pdf"}
+    };
+    PdfChunker chunker = new (200, 40, PDF_PARAGRAPH);
+    Chunk[] chunks = check chunker.chunk(doc);
+
+    test:assertTrue(chunks.length() > 0);
+    foreach Chunk chunk in chunks {
+        anydata content = chunk.content;
+        test:assertTrue(content is string && (<string>content).length() <= 200,
+                msg = "Chunks must respect maxChunkSize in PDF_PARAGRAPH strategy");
+        Metadata? metadata = chunk.metadata;
+        if metadata is Metadata {
+            test:assertEquals(metadata.totalPages, 2,
+                    msg = "totalPages should be set for non-page strategies");
+        }
+    }
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerFileDocumentWithBytes() returns error? {
+    byte[] pdfBytes = check readTestPdfBytes();
+    FileDocument doc = {
+        content: pdfBytes,
+        metadata: {mimeType: "application/pdf", fileName: "TestDoc.pdf"}
+    };
+    PdfChunker chunker = new (1000);
+    Chunk[] chunks = check chunker.chunk(doc);
+    test:assertTrue(chunks.length() > 0);
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerFileDocumentWithUrlRejected() returns error? {
+    FileDocument doc = {content: "https://example.com/doc.pdf"};
+    PdfChunker chunker = new;
+    Chunk[]|Error result = chunker.chunk(doc);
+    if result is Error {
+        test:assertEquals(result.message(),
+                "PdfChunker only supports FileDocument with byte[] content");
+    } else {
+        test:assertFail("Expected Error for FileDocument with non-byte[] content");
+    }
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerTextDocumentEscapeHatch() returns error? {
+    // A TextDocument is treated as already-extracted text and chunked recursively.
+    TextDocument doc = {
+        content: "Paragraph one.\n\nParagraph two is here.\n\nAnd three.",
+        metadata: {mimeType: "application/pdf"}
+    };
+    PdfChunker chunker = new (40, 0);
+    Chunk[] chunks = check chunker.chunk(doc);
+    test:assertTrue(chunks.length() >= 2);
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerUnsupportedDocumentType() returns error? {
+    Document doc = {content: "irrelevant", 'type: "image"};
+    PdfChunker chunker = new;
+    Chunk[]|Error result = chunker.chunk(doc);
+    if result is Error {
+        test:assertEquals(result.message(), "PdfChunker only supports PDF binary/file documents");
+    } else {
+        test:assertFail("Expected Error for unsupported document type");
+    }
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerInvalidPdfBytes() returns error? {
+    BinaryDocument doc = {content: [1, 2, 3, 4, 5]};
+    PdfChunker chunker = new;
+    Chunk[]|Error result = chunker.chunk(doc);
+    test:assertTrue(result is Error, msg = "Invalid PDF bytes should surface as Error");
+}
+
+@test:Config {groups: ["pdf"]}
+function testChunkPdfDocumentFreeFunctionParity() returns error? {
+    byte[] pdfBytes = check readTestPdfBytes();
+    BinaryDocument doc = {
+        content: pdfBytes,
+        metadata: {mimeType: "application/pdf", fileName: "TestDoc.pdf"}
+    };
+    PdfChunker chunker = new (1000);
+    Chunk[] viaClass = check chunker.chunk(doc);
+    Chunk[] viaFunction = check chunkPdfDocument(doc, maxChunkSize = 1000);
+
+    test:assertEquals(viaFunction.length(), viaClass.length());
+    foreach int i in 0 ..< viaFunction.length() {
+        test:assertEquals(viaFunction[i].content, viaClass[i].content);
+    }
+}
+
+@test:Config {groups: ["pdf"]}
+function testPdfChunkerInvalidConfig() returns error? {
+    BinaryDocument doc = {content: [0]};
+    Chunk[]|Error r1 = chunkPdfDocument(doc, maxChunkSize = 0);
+    test:assertTrue(r1 is Error);
+    if r1 is Error {
+        test:assertEquals(r1.message(), "maxChunkSize must be greater than 0");
+    }
+    Chunk[]|Error r2 = chunkPdfDocument(doc, maxChunkSize = 100, maxOverlapSize = 200);
+    test:assertTrue(r2 is Error);
+    if r2 is Error {
+        test:assertEquals(r2.message(), "maxOverlapSize must be less than or equal to maxChunkSize");
     }
 }
 

@@ -53,6 +53,10 @@ public type Metadata record {|
     string header5?;
     # Header of the chunk if the chunk belongs to a single h6 header
     string header6?;
+    # 1-based page number for chunks derived from a PDF document
+    int pageNumber?;
+    # Total number of pages in the source PDF document
+    int totalPages?;
     json...;
 |};
 

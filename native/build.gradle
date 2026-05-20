@@ -31,6 +31,9 @@ dependencies {
     implementation group: 'dev.langchain4j', name: 'langchain4j-core', version: "${langchain4jVersion}"
     implementation group: 'org.apache.opennlp', name: 'opennlp-tools', version: "${openNlpToolsVersion}"
 
+    implementation group: 'org.apache.pdfbox', name: 'pdfbox', version: "${pdfboxVersion}"
+    implementation group: 'org.apache.pdfbox', name: 'pdfbox-io', version: "${pdfboxIoVersion}"
+
     implementation group: 'org.apache.tika', name: 'tika-core', version: "${tikaVersion}", {
         exclude group: 'xml-apis', module: 'xml-apis'
         exclude group: 'xerces', module: 'xercesImpl'

@@ -37,6 +37,7 @@ import io.ballerina.runtime.api.values.BMap;
 import io.ballerina.runtime.api.values.BString;
 import io.ballerina.runtime.api.values.BTypedesc;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,7 +56,10 @@ public class Chunkers {
     private static final String INDEX_FIELD_NAME = "index";
     private static final String ID_FIELD_NAME = "id";
     private static final String PREV_FIELD_NAME = "prev";
-    private static final Set<String> INTEGER_FIELDS = Set.of(INDEX_FIELD_NAME, ID_FIELD_NAME, PREV_FIELD_NAME);
+    private static final String PAGE_NUMBER_FIELD_NAME = "pageNumber";
+    private static final String TOTAL_PAGES_FIELD_NAME = "totalPages";
+    private static final Set<String> INTEGER_FIELDS = Set.of(INDEX_FIELD_NAME, ID_FIELD_NAME, PREV_FIELD_NAME,
+            PAGE_NUMBER_FIELD_NAME, TOTAL_PAGES_FIELD_NAME);
 
     public static Object chunkTextDocument(BMap<BString, Object> document, int chunkSize, int maxOverlapSize,
                                            BString chunkStrategy, BTypedesc textChunkType) {
@@ -89,6 +93,31 @@ public class Chunkers {
             };
             List<TextSegment> textSegments = MarkdownChunker.chunk(content, strategy, chunkSize, maxOverlapSize);
             return createTextChunkRecordArray(document, textSegments, textChunkType.getDescribingType());
+        } catch (RuntimeException e) {
+            return handleChunkingErrors(e);
+        }
+    }
+
+    public static Object chunkPdfDocument(BMap<BString, Object> document, BArray pdfBytes, int chunkSize,
+                                          int maxOverlapSize, BString chunkStrategy, boolean sortByPosition,
+                                          Object password, BTypedesc textChunkType) {
+        try {
+            PdfChunker.PdfChunkStrategy strategy = switch (chunkStrategy.getValue()) {
+                case "PDF_PAGE" -> PdfChunker.PdfChunkStrategy.PDF_PAGE;
+                case "PDF_PARAGRAPH" -> PdfChunker.PdfChunkStrategy.PDF_PARAGRAPH;
+                case "PDF_SENTENCE" -> PdfChunker.PdfChunkStrategy.PDF_SENTENCE;
+                case "PDF_WORD" -> PdfChunker.PdfChunkStrategy.PDF_WORD;
+                case "PDF_CHARACTER" -> PdfChunker.PdfChunkStrategy.PDF_CHARACTER;
+                default -> throw new IllegalArgumentException("unknown PDF chunking strategy "
+                        + chunkStrategy.getValue());
+            };
+            String passwordValue = (password instanceof BString s) ? s.getValue() : null;
+            byte[] bytes = pdfBytes.getBytes();
+            List<TextSegment> textSegments = PdfChunker.chunk(bytes, strategy, chunkSize, maxOverlapSize,
+                    sortByPosition, passwordValue);
+            return createTextChunkRecordArray(document, textSegments, textChunkType.getDescribingType());
+        } catch (IOException e) {
+            return ModuleUtils.createError(e.getMessage() != null ? e.getMessage() : "Failed to parse PDF");
         } catch (RuntimeException e) {
             return handleChunkingErrors(e);
         }

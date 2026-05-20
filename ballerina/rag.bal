@@ -216,6 +216,9 @@ isolated function guessChunker(Document|Chunk doc) returns Chunker {
     if mimeType == "text/html" {
         return new HtmlChunker();
     }
+    if mimeType == "application/pdf" {
+        return new PdfChunker();
+    }
     // Fallback to file name
     string? fileName = doc.metadata?.fileName;
     if fileName is string {
@@ -224,6 +227,9 @@ isolated function guessChunker(Document|Chunk doc) returns Chunker {
         }
         if fileName.endsWith(".html") {
             return new HtmlChunker();
+        }
+        if fileName.endsWith(".pdf") {
+            return new PdfChunker();
         }
     }
     return new GenericRecursiveChunker();
