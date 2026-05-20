@@ -24,6 +24,10 @@ import io.ballerina.runtime.api.types.RecordType;
 import io.ballerina.runtime.api.utils.StringUtils;
 import io.ballerina.runtime.api.values.BMap;
 import io.ballerina.runtime.api.values.BString;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.ParseContext;
@@ -33,6 +37,7 @@ import org.apache.tika.parser.pdf.PDFParser;
 import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.SAXException;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -161,6 +166,44 @@ public class TextDataLoader {
             return createError("Error reading document: " + e.getMessage());
         } catch (RuntimeException e) {
             return createError("Unexpected error: " + e.getMessage());
+        }
+    }
+
+    public static Object readPdfLayout(BString filePath) {
+        String path = filePath.getValue();
+        try {
+            TextDocumentInfo docInfo = parsePDFWithLayout(path);
+            return docInfo.toBallerinaTextDocument();
+        } catch (IOException e) {
+            return createError("Error reading PDF layout: " + e.getMessage());
+        } catch (RuntimeException e) {
+            return createError("Unexpected error: " + e.getMessage());
+        }
+    }
+
+    static TextDocumentInfo parsePDFWithLayout(String path) throws IOException {
+        try (PDDocument document = Loader.loadPDF(new File(path))) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setSortByPosition(true);
+            String content = stripper.getText(document);
+            Map<String, String> metadata = new HashMap<>();
+            PDDocumentInformation info = document.getDocumentInformation();
+            if (info != null) {
+                putIfPresent(metadata, "title", info.getTitle());
+                putIfPresent(metadata, "author", info.getAuthor());
+                putIfPresent(metadata, "subject", info.getSubject());
+                putIfPresent(metadata, "producer", info.getProducer());
+                putIfPresent(metadata, "creator", info.getCreator());
+            }
+            metadata.put("pageCount", String.valueOf(document.getNumberOfPages()));
+            metadata.put("layoutAware", "true");
+            return TextDocumentInfo.fromPdf(content, metadata, getFileName(path));
+        }
+    }
+
+    private static void putIfPresent(Map<String, String> sink, String key, String value) {
+        if (value != null && !value.isEmpty()) {
+            sink.put(key, value);
         }
     }
 

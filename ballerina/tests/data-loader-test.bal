@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ballerina/http;
 import ballerina/test;
 
 // Helper function to validate document structure and metadata
@@ -245,3 +246,220 @@ function testTextDataLoaderMultipleFilesWithInvalidFile() returns error? {
     }
     test:assertFail("Constructor should return error when any file doesn't exist");
 }
+
+@test:Config {groups: ["csv", "document-loader"]}
+function testTextDataLoaderLoadCsv() returns error? {
+    string csvPath = "tests/resources/data-loader/Test.csv";
+    TextDataLoader loader = check new (csvPath);
+
+    Document[]|Document|Error result = loader.load();
+    Document document = check getSingleDocument(result);
+    check validateDocument(document, "text/csv", "Test.csv");
+    test:assertTrue((<string>document.content).includes("Alice"),
+            "CSV content should contain expected row data");
+}
+
+@test:Config {groups: ["tsv", "document-loader"]}
+function testTextDataLoaderLoadTsv() returns error? {
+    string tsvPath = "tests/resources/data-loader/Test.tsv";
+    TextDataLoader loader = check new (tsvPath);
+
+    Document[]|Document|Error result = loader.load();
+    Document document = check getSingleDocument(result);
+    check validateDocument(document, "text/tab-separated-values", "Test.tsv");
+    test:assertTrue((<string>document.content).includes("\t"),
+            "TSV content should contain tab separators");
+}
+
+@test:Config {groups: ["json", "document-loader"]}
+function testTextDataLoaderLoadJson() returns error? {
+    string jsonPath = "tests/resources/data-loader/Test.json";
+    TextDataLoader loader = check new (jsonPath);
+
+    Document[]|Document|Error result = loader.load();
+    Document document = check getSingleDocument(result);
+    check validateDocument(document, "application/json", "Test.json");
+    test:assertTrue((<string>document.content).includes("ballerina-ai"),
+            "JSON content should contain the team identifier");
+}
+
+@test:Config {groups: ["directory-loader", "document-loader"]}
+function testDirectoryDataLoaderNonRecursiveSkipsUnsupported() returns error? {
+    string dirPath = "tests/resources/data-loader/dir";
+    DirectoryDataLoader loader = check new (dirPath);
+
+    Document[]|Document|Error result = loader.load();
+    if result !is Document[] {
+        test:assertFail("Expected an array of documents from directory load");
+    }
+    // dir/ contains mixed.md, mixed.csv, notes.txt (skipped), and dir/nested/nested.json (not visited)
+    test:assertEquals(result.length(), 2, "Should load 2 supported files in non-recursive mode");
+    string[] fileNames = from Document doc in result
+        let string? name = doc.metadata?.fileName
+        where name is string
+        select name;
+    test:assertTrue(fileNames.indexOf("mixed.md") is int, "Should include mixed.md");
+    test:assertTrue(fileNames.indexOf("mixed.csv") is int, "Should include mixed.csv");
+    test:assertTrue(fileNames.indexOf("notes.txt") is (), "Should skip unsupported notes.txt");
+}
+
+@test:Config {groups: ["directory-loader", "document-loader"]}
+function testDirectoryDataLoaderRecursive() returns error? {
+    string dirPath = "tests/resources/data-loader/dir";
+    DirectoryDataLoader loader = check new (dirPath, recursive = true);
+
+    Document[]|Document|Error result = loader.load();
+    if result !is Document[] {
+        test:assertFail("Expected an array of documents from recursive directory load");
+    }
+    test:assertEquals(result.length(), 3, "Should load supported files from subdirectories too");
+    string[] fileNames = from Document doc in result
+        let string? name = doc.metadata?.fileName
+        where name is string
+        select name;
+    test:assertTrue(fileNames.indexOf("nested.json") is int, "Should include nested.json from subdir");
+}
+
+@test:Config {groups: ["directory-loader", "error-handling"]}
+function testDirectoryDataLoaderMissingPath() returns error? {
+    DirectoryDataLoader|Error loader = new ("tests/resources/data-loader/does-not-exist");
+    if loader is Error {
+        test:assertTrue(loader.message().includes("Directory does not exist"),
+                "Error message should indicate missing directory");
+        return;
+    }
+    test:assertFail("Constructor should return error for non-existent directory");
+}
+
+@test:Config {groups: ["directory-loader", "error-handling"]}
+function testDirectoryDataLoaderPathIsFile() returns error? {
+    DirectoryDataLoader|Error loader = new ("tests/resources/data-loader/Test.csv");
+    if loader is Error {
+        test:assertTrue(loader.message().includes("not a directory"),
+                "Error message should indicate path is not a directory");
+        return;
+    }
+    test:assertFail("Constructor should return error when path is a file");
+}
+
+// --- UrlDataLoader tests ----------------------------------------------------
+
+const int URL_LOADER_TEST_PORT = 18799;
+
+isolated service /loader on new http:Listener(URL_LOADER_TEST_PORT, host = "localhost") {
+    isolated resource function get text\.csv() returns http:Response {
+        http:Response res = new;
+        res.setTextPayload("col1,col2\nfoo,bar\n", contentType = "text/csv");
+        return res;
+    }
+
+    isolated resource function get page\.html() returns http:Response {
+        http:Response res = new;
+        res.setTextPayload("<html><body>hi</body></html>", contentType = "text/html");
+        return res;
+    }
+
+    // Served without an extension - type must be inferred from Content-Type.
+    isolated resource function get inferred() returns http:Response {
+        http:Response res = new;
+        res.setTextPayload("{\"ok\": true}", contentType = "application/json");
+        return res;
+    }
+
+    isolated resource function get echoauth(@http:Header string? authorization) returns http:Response {
+        http:Response res = new;
+        res.setTextPayload("auth=" + (authorization ?: "none") + ".json",
+                contentType = "application/json");
+        return res;
+    }
+
+    isolated resource function get unsupported() returns http:Response {
+        http:Response res = new;
+        byte[] payload = [0x00, 0x01];
+        res.setBinaryPayload(payload, contentType = "application/octet-stream");
+        return res;
+    }
+
+    isolated resource function get notfound() returns http:Response {
+        http:Response res = new;
+        res.statusCode = 404;
+        return res;
+    }
+}
+
+@test:Config {groups: ["url-loader", "document-loader"]}
+function testUrlDataLoaderTextByExtension() returns error? {
+    Url url = string `http://localhost:${URL_LOADER_TEST_PORT}/loader/text.csv`;
+    UrlDataLoader loader = new ([url]);
+
+    Document[]|Document|Error result = loader.load();
+    Document document = check getSingleDocument(result);
+    test:assertEquals(document.metadata?.mimeType, "text/csv", "MIME type should be text/csv");
+    test:assertEquals(document.metadata?.fileName, "text.csv", "File name should be derived from URL");
+    test:assertTrue((<string>document.content).includes("foo,bar"), "Content should match the response body");
+}
+
+@test:Config {groups: ["url-loader", "document-loader"]}
+function testUrlDataLoaderTypeInferredFromContentType() returns error? {
+    Url url = string `http://localhost:${URL_LOADER_TEST_PORT}/loader/inferred`;
+    UrlDataLoader loader = new ([url]);
+
+    Document[]|Document|Error result = loader.load();
+    Document document = check getSingleDocument(result);
+    test:assertEquals(document.metadata?.mimeType, "application/json",
+            "Should infer application/json from Content-Type when URL has no extension");
+}
+
+@test:Config {groups: ["url-loader", "document-loader"]}
+function testUrlDataLoaderForwardsHeaders() returns error? {
+    Url url = string `http://localhost:${URL_LOADER_TEST_PORT}/loader/echoauth`;
+    UrlDataLoader loader = new ([url], headers = {"Authorization": "Bearer test-token"});
+
+    Document[]|Document|Error result = loader.load();
+    Document document = check getSingleDocument(result);
+    test:assertTrue((<string>document.content).includes("Bearer test-token"),
+            "Authorization header should be forwarded to the upstream");
+}
+
+@test:Config {groups: ["url-loader", "document-loader", "error-handling"]}
+function testUrlDataLoaderHttpError() returns error? {
+    Url url = string `http://localhost:${URL_LOADER_TEST_PORT}/loader/notfound`;
+    UrlDataLoader loader = new ([url]);
+
+    Document[]|Document|Error result = loader.load();
+    if result is Error {
+        test:assertTrue(result.message().includes("HTTP 404"),
+                "Error message should report the HTTP status");
+        return;
+    }
+    test:assertFail("Loader should return error for non-2xx response");
+}
+
+@test:Config {groups: ["url-loader", "document-loader", "error-handling"]}
+function testUrlDataLoaderUnsupportedContent() returns error? {
+    Url url = string `http://localhost:${URL_LOADER_TEST_PORT}/loader/unsupported`;
+    UrlDataLoader loader = new ([url]);
+
+    Document[]|Document|Error result = loader.load();
+    if result is Error {
+        test:assertTrue(result.message().includes("Unsupported content"),
+                "Error message should indicate unsupported content");
+        return;
+    }
+    test:assertFail("Loader should return error for unsupported content type");
+}
+
+@test:Config {groups: ["url-loader", "document-loader", "error-handling"]}
+function testUrlDataLoaderInvalidUrl() returns error? {
+    Url url = "not-a-url";
+    UrlDataLoader loader = new ([url]);
+
+    Document[]|Document|Error result = loader.load();
+    if result is Error {
+        test:assertTrue(result.message().includes("Invalid URL"),
+                "Error message should indicate invalid URL");
+        return;
+    }
+    test:assertFail("Loader should return error for invalid URL");
+}
+

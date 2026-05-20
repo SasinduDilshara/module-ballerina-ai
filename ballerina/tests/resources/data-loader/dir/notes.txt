@@ -1,0 +1,1 @@
+unsupported file, should be skipped with a log warning
