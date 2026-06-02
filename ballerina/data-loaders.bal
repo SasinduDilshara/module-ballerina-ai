@@ -31,6 +31,8 @@ public type DataLoader isolated object {
 
 # Dataloader that can be used to load supported file types as `TextDocument`s.
 # Currently supports `pdf`, `docx`, `pptx`, `html`, `htm`, `md`, `csv`, `tsv`, and `json` file types.
+# PDF text is extracted with Apache PDFBox using position-sorted extraction, which recovers
+# reading order when a PDF's content-stream order does not match its visual layout.
 public isolated class TextDataLoader {
     *DataLoader;
     final readonly & string[] paths;
@@ -82,7 +84,7 @@ isolated function loadDocument(string path) returns Document|Error {
             return readTextDocument(path, MIME_TYPE_JSON);
         }
         PDF => {
-            return readPdfNative(path);
+            return readPdfLayoutNative(path);
         }
         DOCX => {
             return readDocxNative(path);
@@ -149,11 +151,6 @@ isolated function readTextDocument(string filePath, string? mimeType = ()) retur
     }
 }
 
-isolated function readPdfNative(string path) returns TextDocument|Error = @java:Method {
-    'class: "io.ballerina.stdlib.ai.TextDataLoader",
-    name: "readPdf"
-} external;
-
 isolated function readDocxNative(string path) returns TextDocument|Error = @java:Method {
     'class: "io.ballerina.stdlib.ai.TextDataLoader",
     name: "readDocx"
@@ -169,43 +166,6 @@ isolated function readPdfLayoutNative(string path) returns TextDocument|Error = 
     name: "readPdfLayout"
 } external;
 
-# Dataloader that loads PDF files using a layout-aware text extractor.
-# Unlike `TextDataLoader` (which uses Apache Tika and linearises text), this
-# loader uses Apache PDFBox with position-sorted extraction, preserving the
-# reading order of multi-column documents and tables.
-public isolated class PdfLayoutDataLoader {
-    *DataLoader;
-    final readonly & string[] paths;
-
-    # Initializes the data loader with the given PDF paths.
-    #
-    # + paths - PDF file paths to load
-    # + return - an `ai:Error` if any file is missing or has a non-`.pdf` extension
-    public isolated function init(string... paths) returns Error? {
-        foreach string path in paths {
-            file:MetaData|error metadata = file:getMetaData(path);
-            if metadata is error {
-                return error Error("File does not exist: " + path);
-            }
-            if getFileExtension(path) != "pdf" {
-                return error Error("PdfLayoutDataLoader only supports .pdf files; got: " + path);
-            }
-        }
-        self.paths = paths.cloneReadOnly();
-    }
-
-    # Loads each PDF with layout-aware text extraction.
-    # + return - document or an array of documents, or an `ai:Error` if the loading fails
-    public isolated function load() returns Document[]|Document|Error {
-        Document[] documents = from string path in self.paths
-            select check readPdfLayoutNative(path);
-        if documents.length() == 1 {
-            return documents[0];
-        }
-        return documents;
-    }
-}
-
 # Builds a Document from raw bytes plus a hint for the file type.
 # Used by the cloud loaders after they fetch content from the remote service.
 #
@@ -213,7 +173,7 @@ public isolated class PdfLayoutDataLoader {
 # + mimeType - The reported mime type (may be empty)
 # + fileName - The desired fileName in the resulting Document metadata
 # + return - A Document, or `ai:Error` if the file type cannot be resolved or parsing fails
-public isolated function buildDocumentFromBytes(byte[] bytes, string mimeType, string fileName)
+isolated function buildDocumentFromBytes(byte[] bytes, string mimeType, string fileName)
         returns Document|Error {
     SupportedFileType? fileType = getFileTypeFromMime(mimeType);
     if fileType is () {
@@ -448,7 +408,7 @@ isolated function buildDocumentFromResponse(Url url, SupportedFileType fileType,
 isolated function loadBinaryFromPath(string path, SupportedFileType fileType) returns TextDocument|Error {
     match fileType {
         PDF => {
-            return readPdfNative(path);
+            return readPdfLayoutNative(path);
         }
         DOCX => {
             return readDocxNative(path);

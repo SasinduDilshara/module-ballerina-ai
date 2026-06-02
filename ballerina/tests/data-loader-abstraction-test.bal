@@ -22,9 +22,6 @@
 import ballerina/http;
 import ballerina/test;
 
-// Configurable bound for the severe-level volume loop.
-configurable int severeBatchSize = 8;
-
 // Free port for the in-process cloud/url mock service.
 const int ABSTRACTION_MOCK_PORT = 18900;
 
@@ -96,12 +93,12 @@ function testDataLoaderAbstractionTextLoaderMarkdownSingleDocument() returns err
 }
 
 @test:Config {groups: ["easy"]}
-function testDataLoaderAbstractionPdfLayoutLoaderSmoke() returns error? {
-    DataLoader loader = check new PdfLayoutDataLoader(ABSTRACTION_RESOURCE_DIR + "/TestDoc.pdf");
+function testDataLoaderAbstractionTextLoaderPdfSmoke() returns error? {
+    DataLoader loader = check new TextDataLoader(ABSTRACTION_RESOURCE_DIR + "/TestDoc.pdf");
     Document document = check abstractionSingleDocument(loader.load());
-    test:assertEquals(document.'type, "text", "PdfLayout Document type should be 'text'");
+    test:assertEquals(document.'type, "text", "PDF Document type should be 'text'");
     string content = check abstractionTextContent(document);
-    test:assertTrue(content.length() > 0, "PdfLayout loader should produce non-empty content");
+    test:assertTrue(content.length() > 0, "PDF loader should produce non-empty content");
 }
 
 @test:Config {groups: ["easy"]}
@@ -163,13 +160,13 @@ function testDataLoaderAbstractionDirectoryNonRecursiveVsRecursive() returns err
 }
 
 @test:Config {groups: ["medium"]}
-function testDataLoaderAbstractionPdfLayoutLoaderMetadata() returns error? {
-    DataLoader loader = check new PdfLayoutDataLoader(ABSTRACTION_RESOURCE_DIR + "/TestDoc.pdf");
+function testDataLoaderAbstractionTextLoaderPdfMetadata() returns error? {
+    DataLoader loader = check new TextDataLoader(ABSTRACTION_RESOURCE_DIR + "/TestDoc.pdf");
     Document document = check abstractionSingleDocument(loader.load());
-    test:assertEquals(document.'type, "text", "PdfLayout document type should be 'text'");
+    test:assertEquals(document.'type, "text", "PDF document type should be 'text'");
     Metadata? metadata = document.metadata;
     if metadata is () {
-        test:assertFail("PdfLayout document should carry metadata");
+        test:assertFail("PDF document should carry metadata");
     }
     string content = check abstractionTextContent(document);
     test:assertTrue(content.length() > 0, "Layout-aware extraction should produce non-empty text");
@@ -287,18 +284,10 @@ function testDataLoaderAbstractionConcurrentLoad() returns error? {
 }
 
 // ===========================================================================
-// SEVERE (5) -- cloud loaders and URL loader against an in-process mock.
+// SEVERE (5) -- the URL loader against an in-process mock.
 // ===========================================================================
 
-// Mock JSON / text payloads served by the abstraction mock service.
-const string GOOGLE_DRIVE_FILE_ID = "drive-file-1";
-const string GOOGLE_DRIVE_MISSING_ID = "drive-missing";
-const string SHAREPOINT_SITE_ID = "site-1";
-const string SHAREPOINT_ITEM_ID = "item-1";
-const string SHAREPOINT_MISSING_ID = "item-missing";
-const string SALESFORCE_CONTENT_VERSION_ID = "cv-1";
-
-// In-process service mimicking Google Drive v3, MS Graph v1.0 and Salesforce REST.
+// In-process service mimicking the URL loader endpoints.
 isolated service /mock on new http:Listener(ABSTRACTION_MOCK_PORT, host = "localhost") {
 
     // --- URL loader endpoints ---------------------------------------------
@@ -319,72 +308,6 @@ isolated service /mock on new http:Listener(ABSTRACTION_MOCK_PORT, host = "local
     isolated resource function get url/missing() returns http:Response {
         http:Response res = new;
         res.statusCode = 404;
-        return res;
-    }
-
-    // --- Google Drive v3 endpoints ----------------------------------------
-
-    // File metadata: /drive/v3/files/{id}?fields=...
-    isolated resource function get drive/v3/files/[string fileId](http:Request req) returns http:Response {
-        http:Response res = new;
-        if fileId == GOOGLE_DRIVE_MISSING_ID {
-            res.statusCode = 404;
-            res.setJsonPayload({'error: {message: "File not found"}});
-            return res;
-        }
-        string? altQuery = req.getQueryParamValue("alt");
-        if altQuery == "media" {
-            // Plain media download branch.
-            res.setTextPayload("name,role\nAda,Engineer\n", contentType = "text/csv");
-            return res;
-        }
-        // Metadata branch.
-        res.setJsonPayload({id: fileId, name: "drive-doc.csv", mimeType: "text/csv"});
-        return res;
-    }
-
-    // --- MS Graph v1.0 endpoints ------------------------------------------
-
-    // Drive item metadata: /v1.0/sites/{site}/drive/items/{item}
-    isolated resource function get v1\.0/sites/[string siteId]/drive/items/[string itemId]()
-            returns http:Response {
-        http:Response res = new;
-        if itemId == SHAREPOINT_MISSING_ID {
-            res.statusCode = 404;
-            res.setJsonPayload({'error: {message: "Item not found"}});
-            return res;
-        }
-        res.setJsonPayload({
-            id: itemId,
-            name: "sharepoint-doc.md",
-            file: {mimeType: "text/markdown"}
-        });
-        return res;
-    }
-
-    // Drive item content: /v1.0/sites/{site}/drive/items/{item}/content
-    isolated resource function get v1\.0/sites/[string siteId]/drive/items/[string itemId]/content()
-            returns http:Response {
-        http:Response res = new;
-        res.setTextPayload("# SharePoint Mock\n\nHello from Graph.", contentType = "text/markdown");
-        return res;
-    }
-
-    // --- Salesforce REST endpoints ----------------------------------------
-
-    // ContentVersion metadata: /services/data/{ver}/sobjects/ContentVersion/{id}
-    isolated resource function get services/data/[string apiVersion]/sobjects/ContentVersion/[string id]()
-            returns http:Response {
-        http:Response res = new;
-        res.setJsonPayload({Title: "salesforce-report", FileExtension: "json", FileType: "JSON"});
-        return res;
-    }
-
-    // ContentVersion binary: /services/data/{ver}/sobjects/ContentVersion/{id}/VersionData
-    isolated resource function get services/data/[string apiVersion]/sobjects/ContentVersion/[string id]/VersionData()
-            returns http:Response {
-        http:Response res = new;
-        res.setTextPayload("{\"source\": \"salesforce\"}", contentType = "application/json");
         return res;
     }
 }
@@ -425,100 +348,4 @@ function testDataLoaderAbstractionUrlLoaderMalformedUrl() returns error? {
     }
     test:assertTrue(result.message().includes("Invalid URL"),
             "Malformed URL should produce an 'Invalid URL' error");
-}
-
-@test:Config {groups: ["severe"]}
-function testDataLoaderAbstractionGoogleDriveLoaderAgainstMock() returns error? {
-    string baseUrl = string `http://localhost:${ABSTRACTION_MOCK_PORT}/mock`;
-
-    // Happy path: a non-Workspace file downloaded via ?alt=media.
-    DataLoader loader = check new GoogleDriveDataLoader(
-        [{id: GOOGLE_DRIVE_FILE_ID, kind: "file"}],
-        accessToken = "mock-token",
-        baseUrl = baseUrl);
-    Document document = check abstractionSingleDocument(loader.load());
-    test:assertEquals(document.'type, "text", "Drive document type should be 'text'");
-    test:assertEquals(document.metadata?.mimeType, "text/csv", "Drive csv mime type should be text/csv");
-    string content = check abstractionTextContent(document);
-    test:assertTrue(content.includes("Ada"), "Drive download content should match the mock body");
-
-    // Error path: a missing file id returns HTTP 404 from metadata fetch.
-    DataLoader missingLoader = check new GoogleDriveDataLoader(
-        [{id: GOOGLE_DRIVE_MISSING_ID, kind: "file"}],
-        accessToken = "mock-token",
-        baseUrl = baseUrl);
-    Document[]|Document|Error missingResult = missingLoader.load();
-    if missingResult !is Error {
-        test:assertFail("Drive loader should error for a missing file id");
-    }
-    test:assertTrue(missingResult.message().includes("HTTP 404"),
-            "Drive loader error should report the HTTP 404 status");
-}
-
-@test:Config {groups: ["severe"]}
-function testDataLoaderAbstractionSharePointLoaderAgainstMock() returns error? {
-    string baseUrl = string `http://localhost:${ABSTRACTION_MOCK_PORT}/mock`;
-
-    // Happy path: a file fetched via Microsoft Graph v1.0 shapes.
-    DataLoader loader = check new SharePointDataLoader(
-        [{siteId: SHAREPOINT_SITE_ID, itemId: SHAREPOINT_ITEM_ID, kind: "file"}],
-        accessToken = "mock-token",
-        baseUrl = baseUrl);
-    Document document = check abstractionSingleDocument(loader.load());
-    test:assertEquals(document.'type, "text", "SharePoint document type should be 'text'");
-    string content = check abstractionTextContent(document);
-    test:assertTrue(content.includes("Hello from Graph"),
-            "SharePoint download content should match the mock body");
-
-    // Error path: a missing item id returns HTTP 404 from metadata fetch.
-    DataLoader missingLoader = check new SharePointDataLoader(
-        [{siteId: SHAREPOINT_SITE_ID, itemId: SHAREPOINT_MISSING_ID, kind: "file"}],
-        accessToken = "mock-token",
-        baseUrl = baseUrl);
-    Document[]|Document|Error missingResult = missingLoader.load();
-    if missingResult !is Error {
-        test:assertFail("SharePoint loader should error for a missing item id");
-    }
-    test:assertTrue(missingResult.message().includes("HTTP 404"),
-            "SharePoint loader error should report the HTTP 404 status");
-}
-
-@test:Config {groups: ["severe"]}
-function testDataLoaderAbstractionSalesforceLoaderBatchAgainstMock() returns error? {
-    string instanceUrl = string `http://localhost:${ABSTRACTION_MOCK_PORT}/mock`;
-
-    // Happy path: resolve a ContentVersion to its binary VersionData payload.
-    DataLoader loader = check new SalesforceDataLoader(
-        [SALESFORCE_CONTENT_VERSION_ID],
-        accessToken = "mock-token",
-        instanceUrl = instanceUrl);
-    Document document = check abstractionSingleDocument(loader.load());
-    test:assertEquals(document.'type, "text", "Salesforce document type should be 'text'");
-    string content = check abstractionTextContent(document);
-    test:assertTrue(content.includes("salesforce"),
-            "Salesforce VersionData content should match the mock body");
-
-    // Volume path: load the same ContentVersion `severeBatchSize` times and
-    // confirm every batch entry resolves consistently.
-    string[] batchIds = [];
-    int i = 0;
-    while i < severeBatchSize {
-        batchIds.push(SALESFORCE_CONTENT_VERSION_ID);
-        i += 1;
-    }
-    DataLoader batchLoader = check new SalesforceDataLoader(
-        batchIds,
-        accessToken = "mock-token",
-        instanceUrl = instanceUrl);
-    Document[]|Document|Error batchResult = batchLoader.load();
-    if batchResult !is Document[] {
-        test:assertFail("A multi-id Salesforce load should return a Document[]");
-    }
-    test:assertEquals(batchResult.length(), severeBatchSize,
-            "Batch load should return one document per ContentVersion id");
-    foreach Document doc in batchResult {
-        string docContent = check abstractionTextContent(doc);
-        test:assertTrue(docContent.includes("salesforce"),
-                "Every batched Salesforce document should carry the mock content");
-    }
 }

@@ -23,7 +23,7 @@ module io.ballerina.stdlib.ai {
     requires langchain4j;
     requires langchain4j.core;
     requires org.apache.tika.core;
-    requires org.apache.tika.parser.pdf;
+    requires org.apache.pdfbox;
     requires java.xml;
     requires org.apache.tika.parser.microsoft;
     exports io.ballerina.stdlib.ai;

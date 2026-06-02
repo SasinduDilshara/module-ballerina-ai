@@ -18,10 +18,8 @@
 
 package io.ballerina.stdlib.ai;
 
-import org.apache.tika.exception.TikaException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-import org.xml.sax.SAXException;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -30,11 +28,11 @@ import java.nio.file.Paths;
 public class TextDataLoaderTest {
 
     @Test
-    public void testParsePDF() throws TikaException, IOException, SAXException {
+    public void testParsePdfLayout() throws IOException {
         Path resourcePath = Paths.get(System.getProperty("user.dir"))
                 .resolve("src/test/resources")
                 .resolve("doc-reader-test/TestDoc.pdf");
-        var doc = TextDataLoader.parsePDF(resourcePath.toString());
+        var doc = TextDataLoader.parsePDFWithLayout(resourcePath.toString());
         String content = doc.content();
 
         Assert.assertNotNull(content, "PDF parsing result should not be null");

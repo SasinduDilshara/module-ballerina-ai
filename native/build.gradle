@@ -35,14 +35,6 @@ dependencies {
         exclude group: 'xml-apis', module: 'xml-apis'
         exclude group: 'xerces', module: 'xercesImpl'
     }
-    implementation group: 'org.apache.tika', name: 'tika-parser-pdf-module', version: "${tikaVersion}", {
-        exclude group: 'xml-apis', module: 'xml-apis'
-        exclude group: 'xerces', module: 'xercesImpl'
-        exclude group: 'org.bouncycastle', module: 'bcmail-jdk18on'
-        exclude group: 'org.bouncycastle', module: 'bcprov-jdk18on'
-        exclude group: 'org.bouncycastle', module: 'bcutil-jdk18on'
-        exclude group: 'org.bouncycastle', module: 'bcpkix-jdk18on'
-    }
     implementation group: 'org.apache.tika', name: 'tika-parser-microsoft-module', version: "${tikaVersion}", {
         exclude group: 'xml-apis', module: 'xml-apis'
         exclude group: 'xerces', module: 'xercesImpl'
@@ -52,6 +44,8 @@ dependencies {
         exclude group: 'org.bouncycastle', module: 'bcpkix-jdk18on'
         exclude group: 'com.healthmarketscience.jackcess', module: 'jackcess-encrypt'
     }
+    // PDFBox is used directly for layout-aware PDF text extraction.
+    implementation group: 'org.apache.pdfbox', name: 'pdfbox', version: "${pdfboxVersion}"
 
     checkstyle project(":checkstyle")
     checkstyle "com.puppycrawl.tools:checkstyle:${checkstylePluginVersion}"

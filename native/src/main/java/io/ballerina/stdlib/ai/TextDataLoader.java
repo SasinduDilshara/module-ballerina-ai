@@ -33,7 +33,6 @@ import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
 import org.apache.tika.parser.microsoft.ooxml.OOXMLParser;
-import org.apache.tika.parser.pdf.PDFParser;
 import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.SAXException;
 
@@ -130,19 +129,6 @@ public class TextDataLoader {
         }
     }
 
-    public static Object readPdf(BString filePath) {
-        String path = filePath.getValue();
-        TextDocumentInfo docInfo;
-        try {
-            docInfo = parsePDF(path);
-            return docInfo.toBallerinaTextDocument();
-        } catch (IOException | TikaException | SAXException e) {
-            return createError("Error reading document: " + e.getMessage());
-        } catch (RuntimeException e) {
-            return createError("Unexpected error: " + e.getMessage());
-        }
-    }
-
     public static Object readDocx(BString filePath) {
         String path = filePath.getValue();
         TextDocumentInfo docInfo;
@@ -204,18 +190,6 @@ public class TextDataLoader {
     private static void putIfPresent(Map<String, String> sink, String key, String value) {
         if (value != null && !value.isEmpty()) {
             sink.put(key, value);
-        }
-    }
-
-    static TextDocumentInfo parsePDF(String path) throws IOException, TikaException, SAXException {
-        try (InputStream inputStream = new FileInputStream(path)) {
-            Parser parser = new PDFParser();
-            BodyContentHandler handler = new BodyContentHandler(UNLIMITED_CONTENT_SIZE);
-            Metadata metadata = new Metadata();
-            ParseContext context = new ParseContext();
-            parser.parse(inputStream, handler, metadata, context);
-            String content = handler.toString();
-            return TextDocumentInfo.fromPdf(content, extractMetadata(metadata), getFileName(path));
         }
     }
 

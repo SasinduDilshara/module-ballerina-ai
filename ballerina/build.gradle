@@ -61,9 +61,6 @@ dependencies {
     externalJars(group: 'org.apache.tika', name: 'tika-core', version: "${project.tikaVersion}") {
         transitive = false
     }
-    externalJars(group: 'org.apache.tika', name: 'tika-parser-pdf-module', version: "${project.tikaVersion}") {
-        transitive = false
-    }
     externalJars(group: 'org.apache.tika', name: 'tika-parser-microsoft-module', version: "${project.tikaVersion}") {
         transitive = false
     }
