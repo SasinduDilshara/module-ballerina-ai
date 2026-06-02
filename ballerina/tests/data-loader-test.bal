@@ -14,7 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ballerina/file;
 import ballerina/http;
+import ballerina/io;
 import ballerina/test;
 
 // Helper function to validate document structure and metadata
@@ -385,6 +387,15 @@ isolated service /loader on new http:Listener(URL_LOADER_TEST_PORT, host = "loca
         res.statusCode = 404;
         return res;
     }
+
+    // Serves a real PDF so the URL loader's binary pipeline (download -> temp file ->
+    // native parse -> temp cleanup) is exercised end to end.
+    isolated resource function get doc\.pdf() returns http:Response|error {
+        http:Response res = new;
+        byte[] bytes = check io:fileReadBytes("tests/resources/data-loader/TestDoc.pdf");
+        res.setBinaryPayload(bytes, contentType = "application/pdf");
+        return res;
+    }
 }
 
 @test:Config {groups: ["url-loader", "document-loader"]}
@@ -463,3 +474,159 @@ function testUrlDataLoaderInvalidUrl() returns error? {
     test:assertFail("Loader should return error for invalid URL");
 }
 
+
+// --- Added coverage: URL binary pipeline, query/fragment handling, uppercase
+// --- extensions, empty inputs, metadata fields, and URL/mime helper units. ---
+
+@test:Config {groups: ["url-loader", "document-loader", "pdf"]}
+function testUrlDataLoaderBinaryPdf() returns error? {
+    // Exercises the remote-binary path: download -> temp file -> native parse -> cleanup.
+    Url url = string `http://localhost:${URL_LOADER_TEST_PORT}/loader/doc.pdf`;
+    UrlDataLoader loader = new ([url]);
+
+    Document document = check getSingleDocument(loader.load());
+    test:assertEquals(document.'type, "text", "URL-loaded PDF should produce a text Document");
+    test:assertEquals(document.metadata?.mimeType, "application/pdf", "URL PDF mime type should be application/pdf");
+    test:assertEquals(document.metadata?.fileName, "doc.pdf", "fileName should be derived from the URL path");
+    test:assertTrue((<string>document.content).length() > 0, "Parsed PDF content should not be empty");
+}
+
+@test:Config {groups: ["url-loader", "document-loader"]}
+function testUrlDataLoaderStripsQueryString() returns error? {
+    Url url = string `http://localhost:${URL_LOADER_TEST_PORT}/loader/text.csv?token=abc&v=2`;
+    UrlDataLoader loader = new ([url]);
+
+    Document document = check getSingleDocument(loader.load());
+    test:assertEquals(document.metadata?.fileName, "text.csv",
+            "Query string should be stripped from the derived fileName");
+    test:assertEquals(document.metadata?.mimeType, "text/csv",
+            "Extension resolution should ignore the query string");
+}
+
+@test:Config {groups: ["url-loader", "document-loader"]}
+function testUrlDataLoaderEmptyUrlList() returns error? {
+    UrlDataLoader loader = new ([]);
+    Document[]|Document|Error result = loader.load();
+    if result !is Document[] {
+        test:assertFail("An empty URL list should yield a Document[]");
+    }
+    test:assertEquals(result.length(), 0, "Empty URL list should produce an empty document array");
+}
+
+@test:Config {groups: ["directory-loader", "document-loader"]}
+function testDirectoryDataLoaderOnlyUnsupportedFiles() returns error? {
+    DirectoryDataLoader loader = check new ("tests/resources/data-loader/unsupported-only");
+    Document[]|Document|Error result = loader.load();
+    if result !is Document[] {
+        test:assertFail("A directory of only unsupported files should yield a Document[]");
+    }
+    test:assertEquals(result.length(), 0, "All files are unsupported, so no documents should be produced");
+}
+
+@test:Config {groups: ["directory-loader", "document-loader"]}
+function testDirectoryDataLoaderEmptyDirectory() returns error? {
+    string tempDir = check file:createTempDir();
+    DirectoryDataLoader loader = check new (tempDir);
+    Document[]|Document|Error result = loader.load();
+    file:Error? removeErr = file:remove(tempDir, file:RECURSIVE);
+    if removeErr is file:Error {
+        // best-effort cleanup; not a test failure
+    }
+    if result !is Document[] {
+        test:assertFail("An empty directory should yield a Document[]");
+    }
+    test:assertEquals(result.length(), 0, "An empty directory should produce an empty document array");
+}
+
+@test:Config {groups: ["document-loader", "csv"]}
+function testTextDataLoaderUppercaseExtension() returns error? {
+    // Report.CSV has an UPPERCASE extension; resolution must be case-insensitive.
+    TextDataLoader loader = check new ("tests/resources/data-loader/Report.CSV");
+    Document document = check getSingleDocument(loader.load());
+    test:assertEquals(document.metadata?.mimeType, "text/csv",
+            "Uppercase .CSV should still resolve to text/csv");
+    test:assertEquals(document.metadata?.fileName, "Report.CSV",
+            "fileName should preserve the original casing");
+    test:assertTrue((<string>document.content).includes("Zoe"), "Content should match the fixture");
+}
+
+@test:Config {groups: ["document-loader", "pdf"]}
+function testBuildDocumentFromBytesBinaryPdf() returns error? {
+    // Covers buildDocumentFromBytes' binary branch (temp file + native parse).
+    byte[] pdfBytes = check io:fileReadBytes("tests/resources/data-loader/TestDoc.pdf");
+    Document|Error result = buildDocumentFromBytes(pdfBytes, "application/pdf", "frombytes.pdf");
+    if result is Error {
+        test:assertFail("buildDocumentFromBytes should parse a PDF byte payload: " + result.message());
+    }
+    test:assertEquals(result.'type, "text", "Built document should be of type 'text'");
+    test:assertEquals(result.metadata?.mimeType, "application/pdf", "mime type should be application/pdf");
+    test:assertEquals(result.metadata?.fileName, "frombytes.pdf", "fileName should be preserved");
+    test:assertTrue((<string>result.content).length() > 0, "Parsed PDF content should not be empty");
+}
+
+@test:Config {groups: ["document-loader"]}
+function testTextDataLoaderMetadataFields() returns error? {
+    TextDataLoader loader = check new ("tests/resources/data-loader/Test.csv");
+    Document document = check getSingleDocument(loader.load());
+    decimal? fileSize = document.metadata?.fileSize;
+    test:assertTrue(fileSize is decimal && fileSize > 0d, "fileSize metadata should be a positive decimal");
+    test:assertTrue(document.metadata?.modifiedAt !is (), "modifiedAt metadata should be populated");
+}
+
+@test:Config {groups: ["url-loader", "unit"]}
+function testGetFileNameFromUrlVariants() {
+    test:assertEquals(getFileNameFromUrl("http://host/a/b/file.csv", CSV), "file.csv",
+            "Plain URL should yield the last path segment");
+    test:assertEquals(getFileNameFromUrl("http://host/a/file.csv?token=x", CSV), "file.csv",
+            "Query string should be stripped from the fileName");
+    test:assertEquals(getFileNameFromUrl("http://host/a/file.csv#section", CSV), "file.csv",
+            "Fragment should be stripped from the fileName");
+    test:assertEquals(getFileNameFromUrl("http://host/dir/", JSON), "index.json",
+            "A trailing slash should fall back to index.<type>");
+}
+
+@test:Config {groups: ["url-loader", "unit"]}
+function testGetFileExtensionFromUrlVariants() {
+    test:assertEquals(getFileExtensionFromUrl("http://host/dir/file.csv?token=x"), "csv",
+            "Extension should be resolved after stripping the query");
+    test:assertEquals(getFileExtensionFromUrl("http://host/dir/file.json#frag"), "json",
+            "Extension should be resolved after stripping the fragment");
+    test:assertEquals(getFileExtensionFromUrl("http://host/noext"), "unknown",
+            "A path with no extension should yield 'unknown'");
+}
+
+@test:Config {groups: ["url-loader", "unit"]}
+function testSplitUrlVariants() returns error? {
+    [string, string]|Error withPath = splitUrl("http://host/a/b");
+    if withPath is Error {
+        test:assertFail("splitUrl should succeed for a URL with a path");
+    }
+    test:assertEquals(withPath[0], "http://host", "origin should be split correctly");
+    test:assertEquals(withPath[1], "/a/b", "path should be split correctly");
+
+    [string, string]|Error noPath = splitUrl("http://host");
+    if noPath is Error {
+        test:assertFail("splitUrl should succeed for a URL without a path");
+    }
+    test:assertEquals(noPath[1], "/", "A URL with no path should default the path to '/'");
+
+    [string, string]|Error invalid = splitUrl("not-a-url");
+    test:assertTrue(invalid is Error, "splitUrl should error on a URL without a scheme separator");
+}
+
+@test:Config {groups: ["document-loader", "unit"]}
+function testGetFileTypeFromMimeVariants() {
+    test:assertEquals(getFileTypeFromMime("text/csv; charset=utf-8"), CSV,
+            "A mime type with parameters should still resolve");
+    test:assertEquals(getFileTypeFromMime("application/xhtml+xml"), HTML,
+            "xhtml+xml should resolve to HTML");
+    test:assertTrue(getFileTypeFromMime("application/zip") is (),
+            "An unsupported mime type should resolve to ()");
+}
+
+@test:Config {groups: ["document-loader", "unit"]}
+function testFileTypeCaseInsensitiveAndNoExtension() {
+    test:assertEquals(getFileType("X.PDF"), PDF, "Uppercase extension should resolve case-insensitively");
+    test:assertEquals(getFileExtension("Report.CSV"), "csv", "getFileExtension should lower-case the extension");
+    test:assertTrue(getFileType("README") is (), "A file with no extension should resolve to ()");
+}
