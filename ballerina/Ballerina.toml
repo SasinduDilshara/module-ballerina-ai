@@ -56,12 +56,6 @@ path="./lib/tika-core-3.2.2.jar"
 
 [[platform.java21.dependency]]
 groupId = "org.apache.tika"
-artifactId = "tika-parser-pdf-module"
-version = "3.2.2"
-path="./lib/tika-parser-pdf-module-3.2.2.jar"
-
-[[platform.java21.dependency]]
-groupId = "org.apache.tika"
 artifactId = "tika-parser-microsoft-module"
 version = "3.2.2"
 path="./lib/tika-parser-microsoft-module-3.2.2.jar"
