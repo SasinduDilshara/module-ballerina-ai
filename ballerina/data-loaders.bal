@@ -63,6 +63,46 @@ public isolated class TextDataLoader {
     }
 }
 
+# Dataloader specialized for loading PDF files as `TextDocument`s.
+# PDF text is extracted with Apache PDFBox using position-sorted extraction, which recovers
+# reading order when a PDF's content-stream order does not match its visual layout.
+# Unlike `TextDataLoader`, this loader accepts PDF files exclusively; any non-PDF path is
+# rejected at initialization time.
+public isolated class PdfDataLoader {
+    *DataLoader;
+    final readonly & string[] paths;
+
+    # Initializes the data loader with the given PDF file paths.
+    #
+    # + paths - The paths to the PDF files to load
+    # + return - an `ai:Error` if a file does not exist or is not a PDF
+    public isolated function init(string... paths) returns Error? {
+        foreach string path in paths {
+            file:MetaData|error metadata = file:getMetaData(path);
+            if metadata is error {
+                return error Error("File does not exist: " + path);
+            }
+            if getFileType(path) != PDF {
+                return error Error(string `Unsupported file type: ${getFileExtension(path)}. `
+                    + string `PdfDataLoader only supports 'pdf' files`);
+            }
+        }
+        self.paths = paths.cloneReadOnly();
+    }
+
+    # Loads the configured PDF files as `TextDocument`s.
+    #
+    # + return - document or an array of documents, or an `ai:Error` if the loading fails
+    public isolated function load() returns Document[]|Document|Error {
+        Document[] documents = from string path in self.paths
+            select check readPdfLayoutNative(path);
+        if documents.length() == 1 {
+            return documents[0];
+        }
+        return documents;
+    }
+}
+
 isolated function loadDocument(string path) returns Document|Error {
     string? fileType = getFileType(path);
     if fileType is () {

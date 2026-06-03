@@ -630,3 +630,117 @@ function testFileTypeCaseInsensitiveAndNoExtension() {
     test:assertEquals(getFileExtension("Report.CSV"), "csv", "getFileExtension should lower-case the extension");
     test:assertTrue(getFileType("README") is (), "A file with no extension should resolve to ()");
 }
+
+// --- PdfDataLoader tests ----------------------------------------------------
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader"]}
+function testPdfDataLoaderLoadSingle() returns error? {
+    string pdfPath = "tests/resources/data-loader/TestDoc.pdf";
+    PdfDataLoader loader = check new (pdfPath);
+
+    Document[]|Document|Error result = loader.load();
+    Document document = check getSingleDocument(result);
+    check validateDocument(document, "application/pdf", "TestDoc.pdf");
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader", "single-file"]}
+function testPdfDataLoaderSingleFileReturnsSingleDocument() returns error? {
+    string pdfPath = "tests/resources/data-loader/TestDoc.pdf";
+    PdfDataLoader loader = check new (pdfPath);
+
+    Document[]|Document|Error result = loader.load();
+    if result is Document {
+        check validateDocument(result, "application/pdf", "TestDoc.pdf");
+    } else {
+        test:assertFail("Should return single document when loading single PDF");
+    }
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader", "multiple-files"]}
+function testPdfDataLoaderMultipleFiles() returns error? {
+    string pdfPath = "tests/resources/data-loader/TestDoc.pdf";
+    PdfDataLoader loader = check new (pdfPath, pdfPath);
+
+    Document[]|Document|Error result = loader.load();
+    if result is Document[] {
+        test:assertEquals(result.length(), 2, "Should return array with 2 documents");
+        check validateDocument(result[0], "application/pdf", "TestDoc.pdf");
+        check validateDocument(result[1], "application/pdf", "TestDoc.pdf");
+    } else {
+        test:assertFail("Should return array of documents when loading multiple PDFs");
+    }
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader", "multiple-files"]}
+function testPdfDataLoaderEmptyPaths() returns error? {
+    PdfDataLoader loader = check new ();
+
+    Document[]|Document|Error result = loader.load();
+    if result !is Document[] {
+        test:assertFail("An empty path list should yield a Document[]");
+    }
+    test:assertEquals(result.length(), 0, "Empty path list should produce an empty document array");
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader", "error-handling"]}
+function testPdfDataLoaderFileDoesNotExist() returns error? {
+    string nonExistentPath = "tests/resources/data-loader/non_existent_file.pdf";
+    PdfDataLoader|Error loader = new (nonExistentPath);
+
+    if loader is Error {
+        test:assertTrue(loader.message().includes("File does not exist"),
+                "Error message should indicate file does not exist");
+        return;
+    }
+    test:assertFail("Constructor should return error for non-existent files");
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader", "error-handling"]}
+function testPdfDataLoaderRejectsNonPdf() returns error? {
+    string csvPath = "tests/resources/data-loader/Test.csv";
+    PdfDataLoader|Error loader = new (csvPath);
+
+    if loader is Error {
+        test:assertTrue(loader.message().includes("Unsupported file type: csv"),
+                "Error message should report the rejected extension");
+        test:assertTrue(loader.message().includes("only supports 'pdf'"),
+                "Error message should clarify only PDF is supported");
+        return;
+    }
+    test:assertFail("Constructor should reject non-PDF files");
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader", "error-handling", "multiple-files"]}
+function testPdfDataLoaderRejectsNonPdfAmongValid() returns error? {
+    string pdfPath = "tests/resources/data-loader/TestDoc.pdf";
+    string docxPath = "tests/resources/data-loader/TestDoc.docx";
+    PdfDataLoader|Error loader = new (pdfPath, docxPath);
+
+    if loader is Error {
+        test:assertTrue(loader.message().includes("Unsupported file type: docx"),
+                "Constructor should reject when any path is not a PDF");
+        return;
+    }
+    test:assertFail("Constructor should reject a mix containing a non-PDF file");
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader", "error-handling"]}
+function testPdfDataLoaderRejectsExtensionlessFile() returns error? {
+    // A file with no extension resolves to an unknown type and must be rejected.
+    PdfDataLoader|Error loader = new ("tests/resources/data-loader/test.txt");
+
+    if loader is Error {
+        test:assertTrue(loader.message().includes("Unsupported file type: txt"),
+                "Constructor should reject a non-PDF extension");
+        return;
+    }
+    test:assertFail("Constructor should reject a non-PDF file");
+}
+
+@test:Config {groups: ["pdf", "document-loader", "pdf-loader"]}
+function testPdfDataLoaderViaAbstraction() returns error? {
+    // Exercise the loader through the DataLoader abstraction type.
+    DataLoader loader = check new PdfDataLoader("tests/resources/data-loader/TestDoc.pdf");
+    Document document = check getSingleDocument(loader.load());
+    check validateDocument(document, "application/pdf", "TestDoc.pdf");
+}
